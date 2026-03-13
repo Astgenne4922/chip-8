@@ -1,3 +1,5 @@
+use std::path::Path;
+
 const FONT: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -106,6 +108,35 @@ impl Default for CPU {
 }
 
 impl CPU {
+    pub fn one_clock_cycle(&mut self, pressed_key: Option<Key>) {
+        let instruction = self.fetch();
+        let opcode = self.decode(instruction);
+        self.execute(opcode, pressed_key);
+    }
+
+    pub fn is_beeping(&self) -> bool {
+        self.sound_timer > 0
+    }
+
+    pub fn decrement_sound(&mut self) {
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+    }
+
+    pub fn decrement_delay(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+    }
+
+    pub fn load_rom(&mut self, rom_path: &Path) {
+        let rom = std::fs::read(rom_path).unwrap();
+        for (i, byte) in rom.iter().enumerate() {
+            self.memory[0x200 + i] = *byte;
+        }
+    }
+
     fn fetch(&mut self) -> u16 {
         let instruction = ((self.memory[self.pc] as u16) << 8) + (self.memory[self.pc + 1] as u16);
         self.pc += 2;
