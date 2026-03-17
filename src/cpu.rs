@@ -137,6 +137,10 @@ impl CPU {
         }
     }
 
+    pub fn display(&self) -> &[[bool; 64]; 32] {
+        &self.display
+    }
+
     fn fetch(&mut self) -> u16 {
         let instruction = ((self.memory[self.pc] as u16) << 8) + (self.memory[self.pc + 1] as u16);
         self.pc += 2;
