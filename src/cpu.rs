@@ -230,10 +230,10 @@ impl CPU {
                     self.registers[instruction.x as usize] = sub;
                     self.registers[0xF] = if carry { 0 } else { 1 };
                 }
-                // 8XY6 -> Set VX to VX << 1 (with carry flag)
+                // 8XY6 -> Set VX to VX >> 1 (with carry flag)
                 0x06 => {
                     self.registers[0xF] = (self.registers[instruction.x as usize] & 0x80) >> 7;
-                    self.registers[instruction.x as usize] <<= 1;
+                    self.registers[instruction.x as usize] >>= 1;
                 }
                 // 8XY7 -> Subtract VX from VY (with carry flag)
                 0x07 => {
@@ -242,10 +242,10 @@ impl CPU {
                     self.registers[instruction.y as usize] = sub;
                     self.registers[0xF] = if carry { 0 } else { 1 };
                 }
-                // 8XYE -> Set VX to VX >> 1 (with carry flag)
+                // 8XYE -> Set VX to VX << 1 (with carry flag)
                 0x0E => {
                     self.registers[0xF] = self.registers[instruction.x as usize] & 0x1;
-                    self.registers[instruction.x as usize] >>= 1;
+                    self.registers[instruction.x as usize] <<= 1;
                 }
                 _ => unreachable!(),
             },
