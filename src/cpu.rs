@@ -92,7 +92,7 @@ pub struct CPU {
 impl Default for CPU {
     fn default() -> Self {
         let mut memory = [0; 4096];
-        memory[0x50..0x9F].copy_from_slice(&FONT);
+        memory[0x50..=0x9F].copy_from_slice(&FONT);
 
         Self {
             memory,
