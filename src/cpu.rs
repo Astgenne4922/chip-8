@@ -174,7 +174,7 @@ impl CPU {
             }
             // 9XY0 -> Skip one if VX != VY
             (0x9, _, _, 0x0) => {
-                if self.registers.read(x) != self.registers.read(x) {
+                if self.registers.read(x) != self.registers.read(y) {
                     self.pc += 2;
                 }
             }
@@ -183,7 +183,7 @@ impl CPU {
             // BNNN -> Jump to address NNN + V0
             (0xB, _, _, _) => self.pc = (nnn + (self.registers.read(0x0u8) as u16)) as usize,
             // CXNN -> Sets VX to RAND & NN
-            (0xC, _, _, _) => self.registers.write(x, rand::random_range(0..255) & nn),
+            (0xC, _, _, _) => self.registers.write(x, rand::random_range(0..=255) & nn),
             // DXYN -> Draws the display
             (0xD, _, _, _) => {
                 let mut vy = self.registers.read(y) % 32;
