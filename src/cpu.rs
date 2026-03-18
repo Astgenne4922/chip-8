@@ -1,126 +1,56 @@
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, Ordering},
+    },
+};
 
-const FONT: [u8; 80] = [
-    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-    0x20, 0x60, 0x20, 0x20, 0x70, // 1
-    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-];
+use crate::emu::{
+    keyboard::Key,
+    memory::{RAM, Registers},
+};
 
-pub struct OPCODE {
-    code: u8,
-    x: u8,
-    y: u8,
-    n: u8,
-    nn: u8,
-    nnn: u16,
-}
+type Opcode = (u8, u8, u8, u8, u8, u16);
 
-#[derive(Clone)]
-pub enum Key {
-    ZERO,
-    ONE,
-    TWO,
-    THREE,
-    FOUR,
-    FIVE,
-    SIX,
-    SEVEN,
-    EIGHT,
-    NINE,
-    A,
-    B,
-    C,
-    D,
-    E,
-    F,
-}
-
-impl PartialEq<u8> for Key {
-    fn eq(&self, other: &u8) -> bool {
-        let key: u8 = self.clone().into();
-        key == *other
-    }
-}
-
-impl From<Key> for u8 {
-    fn from(val: Key) -> Self {
-        match val {
-            Key::ZERO => 0x0,
-            Key::ONE => 0x1,
-            Key::TWO => 0x2,
-            Key::THREE => 0x3,
-            Key::FOUR => 0x4,
-            Key::FIVE => 0x5,
-            Key::SIX => 0x6,
-            Key::SEVEN => 0x7,
-            Key::EIGHT => 0x8,
-            Key::NINE => 0x9,
-            Key::A => 0xA,
-            Key::B => 0xB,
-            Key::C => 0xC,
-            Key::D => 0xD,
-            Key::E => 0xE,
-            Key::F => 0xF,
-        }
-    }
-}
+pub type Display = Arc<Mutex<[[bool; 64]; 32]>>;
 
 pub struct CPU {
-    memory: [u8; 4096],
-    registers: [u8; 16],
+    ram: RAM,
+    registers: Registers,
     pc: usize,
     i: u16,
     stack: Vec<u16>,
-    display: [[bool; 64]; 32],
+    display: Display,
     delay_timer: u8,
-    sound_timer: u8,
+    sound_timer: Arc<AtomicU8>,
 }
 
 impl Default for CPU {
     fn default() -> Self {
-        let mut memory = [0; 4096];
-        memory[0x50..=0x9F].copy_from_slice(&FONT);
-
         Self {
-            memory,
-            registers: [0; 16],
+            ram: RAM::default(),
+            registers: Registers::default(),
             pc: 0x200,
             i: 0,
             stack: Vec::with_capacity(16),
-            display: [[false; 64]; 32],
+            display: Arc::new(Mutex::new([[false; 64]; 32])),
             delay_timer: 0,
-            sound_timer: 0,
+            sound_timer: Arc::new(AtomicU8::new(0)),
         }
     }
 }
 
 impl CPU {
-    pub fn one_clock_cycle(&mut self, pressed_key: Option<Key>) {
+    pub fn one_clock_cycle(&mut self, pressed_keys: &[Key]) {
         let instruction = self.fetch();
         let opcode = self.decode(instruction);
-        self.execute(opcode, pressed_key);
-    }
-
-    pub fn is_beeping(&self) -> bool {
-        self.sound_timer > 0
+        self.execute(opcode, pressed_keys);
     }
 
     pub fn decrement_sound(&mut self) {
-        if self.sound_timer > 0 {
-            self.sound_timer -= 1;
+        if self.sound_timer.fetch_sub(1, Ordering::SeqCst) == u8::MAX {
+            self.sound_timer.store(0, Ordering::Relaxed);
         }
     }
 
@@ -132,224 +62,199 @@ impl CPU {
 
     pub fn load_rom(&mut self, rom_path: &Path) {
         let rom = std::fs::read(rom_path).unwrap();
-        for (i, byte) in rom.iter().enumerate() {
-            self.memory[0x200 + i] = *byte;
-        }
+        self.ram.put(0x200, &rom);
     }
 
-    pub fn display(&self) -> &[[bool; 64]; 32] {
+    pub fn display(&self) -> &Display {
         &self.display
     }
 
     fn fetch(&mut self) -> u16 {
-        let instruction = ((self.memory[self.pc] as u16) << 8) + (self.memory[self.pc + 1] as u16);
+        let instruction = ((self.ram.read(self.pc) as u16) << 8) + (self.ram.read(self.pc + 1) as u16);
         self.pc += 2;
         instruction
     }
 
-    fn decode(&mut self, instruction: u16) -> OPCODE {
-        OPCODE {
-            code: ((instruction & 0xF000) >> 12) as u8,
-            x: ((instruction & 0x0F00) >> 8) as u8,
-            y: ((instruction & 0x00F0) >> 4) as u8,
-            n: (instruction & 0x000F) as u8,
-            nn: (instruction & 0x00FF) as u8,
-            nnn: instruction & 0x0FFF,
-        }
+    fn decode(&mut self, instruction: u16) -> Opcode {
+        (
+            ((instruction & 0xF000) >> 12) as u8,
+            ((instruction & 0x0F00) >> 8) as u8,
+            ((instruction & 0x00F0) >> 4) as u8,
+            (instruction & 0x000F) as u8,
+            (instruction & 0x00FF) as u8,
+            instruction & 0x0FFF,
+        )
     }
 
-    fn execute(&mut self, instruction: OPCODE, pressed_key: Option<Key>) {
-        match instruction.code {
-            0x00 => match instruction.nnn {
-                // 00E0 -> Clear Screen
-                0x0E0 => self.display = [[false; 64]; 32],
-                // 00EE -> Return from subroutine
-                0x0EE => {
-                    self.pc = self.stack.pop().unwrap() as usize;
-                }
-                _ => unreachable!(),
-            },
+    fn execute(&mut self, instruction: Opcode, pressed_keys: &[Key]) {
+        let (code, x, y, n, nn, nnn) = instruction;
+        match (code, x, y, n) {
+            // 0000 -> Call SYS routine (NOT IMPLEMENTED)
+            (0x0, 0x0, 0x0, 0x0) => unimplemented!(),
+            // 00E0 -> Clear Screen
+            (0x0, 0x0, 0xE, 0x0) => *self.display.lock().unwrap() = [[false; 64]; 32],
+            // 00EE -> Return from subroutine
+            (0x0, 0x0, 0xE, 0xE) => self.pc = self.stack.pop().unwrap() as usize,
             // 1NNN -> Jump
-            0x01 => self.pc = instruction.nnn as usize,
+            (0x1, _, _, _) => self.pc = nnn as usize,
             // 2NNN -> Call subroutine
-            0x02 => {
+            (0x2, _, _, _) => {
                 self.stack.push(self.pc as u16);
-                self.pc = instruction.nnn as usize;
+                self.pc = nnn as usize;
             }
             // 3XNN -> Skip one if VX == NN
-            0x03 => {
-                self.pc += if self.registers[instruction.x as usize] == instruction.nn {
-                    2
-                } else {
-                    0
-                };
+            (0x3, _, _, _) => {
+                if self.registers.read(x) == nn {
+                    self.pc += 2;
+                }
             }
             // 4XNN -> Skip one if VX != NN
-            0x04 => {
-                self.pc += if self.registers[instruction.x as usize] != instruction.nn {
-                    2
-                } else {
-                    0
-                };
+            (0x4, _, _, _) => {
+                if self.registers.read(x) != nn {
+                    self.pc += 2;
+                }
             }
             // 5XY0 -> Skip one if VX == VY
-            0x05 => {
-                self.pc += if self.registers[instruction.x as usize] == self.registers[instruction.y as usize] {
-                    2
-                } else {
-                    0
-                };
+            (0x5, _, _, 0x0) => {
+                if self.registers.read(x) == self.registers.read(y) {
+                    self.pc += 2;
+                }
             }
             // 6XNN -> Set VX to NN
-            0x06 => self.registers[instruction.x as usize] = instruction.nn,
+            (0x6, _, _, _) => self.registers.write(x, nn),
             // 7XNN -> Add NN to VX
-            0x07 => {
-                self.registers[instruction.x as usize] =
-                    self.registers[instruction.x as usize].overflowing_add(instruction.nn).0;
+            (0x7, _, _, _) => self.registers.write(x, self.registers.read(x).overflowing_add(nn).0),
+            // 8XY0 -> Set VX to VY
+            (0x8, _, _, 0x0) => self.registers.write(x, self.registers.read(y)),
+            // 8XY1 -> Set VX to VX OR VY
+            (0x8, _, _, 0x1) => self.registers.write(x, self.registers.read(x) | self.registers.read(y)),
+            // 8XY2 -> Set VX to VX AND VY
+            (0x8, _, _, 0x2) => self.registers.write(x, self.registers.read(x) & self.registers.read(y)),
+            // 8XY3 -> Set VX to VX XOR VY
+            (0x8, _, _, 0x3) => self.registers.write(x, self.registers.read(x) ^ self.registers.read(y)),
+            // 8XY4 -> Add VY to VX (with carry flag)
+            (0x8, _, _, 0x4) => {
+                let (sum, carry) = self.registers.read(x).overflowing_add(self.registers.read(y));
+                self.registers.write(x, sum);
+                self.registers.write(0xFu8, if carry { 1 } else { 0 });
             }
-            0x08 => match instruction.n {
-                // 8XY0 -> Set VX to VY
-                0x00 => self.registers[instruction.x as usize] = self.registers[instruction.y as usize],
-                // 8XY1 -> Set VX to VX OR VY
-                0x01 => self.registers[instruction.x as usize] |= self.registers[instruction.y as usize],
-                // 8XY2 -> Set VX to VX AND VY
-                0x02 => self.registers[instruction.x as usize] &= self.registers[instruction.y as usize],
-                // 8XY3 -> Set VX to VX XOR VY
-                0x03 => self.registers[instruction.x as usize] ^= self.registers[instruction.y as usize],
-                // 8XY4 -> Add VY to VX (with carry flag)
-                0x04 => {
-                    let (sum, carry) =
-                        self.registers[instruction.x as usize].overflowing_add(self.registers[instruction.y as usize]);
-                    self.registers[instruction.x as usize] = sum;
-                    self.registers[0xF] = if carry { 1 } else { 0 };
+            // 8XY5 -> Subtract VY from VX (with carry flag)
+            (0x8, _, _, 0x5) => {
+                let (sub, carry) = self.registers.read(x).overflowing_sub(self.registers.read(y));
+                self.registers.write(x, sub);
+                if carry {
+                    self.registers.write(0xFu8, if carry { 0 } else { 1 });
                 }
-                // 8XY5 -> Subtract VY from VX (with carry flag)
-                0x05 => {
-                    let (sub, carry) =
-                        self.registers[instruction.x as usize].overflowing_sub(self.registers[instruction.y as usize]);
-                    self.registers[instruction.x as usize] = sub;
-                    self.registers[0xF] = if carry { 0 } else { 1 };
-                }
-                // 8XY6 -> Set VX to VX >> 1 (with carry flag)
-                0x06 => {
-                    self.registers[0xF] = (self.registers[instruction.x as usize] & 0x80) >> 7;
-                    self.registers[instruction.x as usize] >>= 1;
-                }
-                // 8XY7 -> Subtract VX from VY (with carry flag)
-                0x07 => {
-                    let (sub, carry) =
-                        self.registers[instruction.y as usize].overflowing_sub(self.registers[instruction.x as usize]);
-                    self.registers[instruction.y as usize] = sub;
-                    self.registers[0xF] = if carry { 0 } else { 1 };
-                }
-                // 8XYE -> Set VX to VX << 1 (with carry flag)
-                0x0E => {
-                    self.registers[0xF] = self.registers[instruction.x as usize] & 0x1;
-                    self.registers[instruction.x as usize] <<= 1;
-                }
-                _ => unreachable!(),
-            },
+            }
+            // 8XY6 -> Set VX to VX >> 1 (with carry flag)
+            (0x8, _, _, 0x6) => {
+                let vx = self.registers.read(x);
+                self.registers.write(0xFu8, (vx & 0b10000000) >> 7);
+                self.registers.write(x, vx >> 1);
+            }
+            // 8XY7 -> Subtract VX from VY (with carry flag)
+            (0x8, _, _, 0x7) => {
+                let (sub, carry) = self.registers.read(y).overflowing_sub(self.registers.read(x));
+                self.registers.write(y, sub);
+                self.registers.write(0xFu8, if carry { 0 } else { 1 });
+            }
+            // 8XYE -> Set VX to VX << 1 (with carry flag)
+            (0x8, _, _, 0xE) => {
+                let vx = self.registers.read(x);
+                self.registers.write(0xFu8, vx & 0x1);
+                self.registers.write(x, vx << 1);
+            }
             // 9XY0 -> Skip one if VX != VY
-            0x09 => {
-                self.pc += if self.registers[instruction.x as usize] != self.registers[instruction.y as usize] {
-                    2
-                } else {
-                    0
-                };
+            (0x9, _, _, 0x0) => {
+                if self.registers.read(x) != self.registers.read(x) {
+                    self.pc += 2;
+                }
             }
             // ANNN -> Set I to NNN
-            0x0A => self.i = instruction.nnn,
+            (0xA, _, _, _) => self.i = nnn,
             // BNNN -> Jump to address NNN + V0
-            0x0B => self.pc = (instruction.nnn + (self.registers[0x0] as u16)) as usize,
+            (0xB, _, _, _) => self.pc = (nnn + (self.registers.read(0x0u8) as u16)) as usize,
             // CXNN -> Sets VX to RAND & NN
-            0x0C => self.registers[instruction.x as usize] = rand::random_range(0..255) & instruction.nn,
+            (0xC, _, _, _) => self.registers.write(x, rand::random_range(0..255) & nn),
             // DXYN -> Draws the display
-            0x0D => {
-                let mut y = self.registers[instruction.y as usize] % 32;
+            (0xD, _, _, _) => {
+                let mut vy = self.registers.read(y) % 32;
 
-                for i in 0..instruction.n as u16 {
-                    let mut x = self.registers[instruction.x as usize] % 64;
-                    if y >= 32 {
+                let mut display = self.display.lock().unwrap();
+                for i in 0..n as u16 {
+                    let mut vx = self.registers.read(x) % 64;
+                    if vy >= 32 {
                         break;
                     }
-                    let s = self.memory[(self.i + i) as usize];
+                    let s = self.ram.read(self.i + i);
                     for b in 0..8 {
-                        if x >= 64 {
+                        if vx >= 64 {
                             break;
                         }
-                        self.display[y as usize][x as usize] = ((s & (1 << (7 - b))) >> (7 - b)) == 1;
-                        if self.display[y as usize][x as usize] {
-                            self.registers[0xF] = 1;
+                        display[vy as usize][vx as usize] = ((s & (1 << (7 - b))) >> (7 - b)) == 1;
+                        if display[vy as usize][vx as usize] {
+                            self.registers.write(0xFu8, 1);
                         }
-                        x += 1;
+                        vx += 1;
                     }
-                    y += 1;
+                    vy += 1;
                 }
             }
-            0x0E => match instruction.nn {
-                // EX9E -> Skip one if key VX is pressed
-                0x9E => {
-                    if let Some(key) = pressed_key {
-                        self.pc += if key == self.registers[instruction.x as usize] {
-                            2
-                        } else {
-                            0
-                        };
-                    }
+            // EX9E -> Skip one if key VX is pressed
+            (0xE, _, 0x9, 0xE) => {
+                if pressed_keys.contains(&self.registers.read(x).into()) {
+                    self.pc += 2;
                 }
-                // EXA1 -> Skip one if key VX is not pressed
-                0xA1 => {
-                    self.pc += if pressed_key.is_none_or(|k| k != self.registers[instruction.x as usize]) {
-                        2
-                    } else {
-                        0
-                    }
+            }
+            // EXA1 -> Skip one if key VX is not pressed
+            (0xE, _, 0xA, 0x1) => {
+                if !pressed_keys.contains(&self.registers.read(x).into()) {
+                    self.pc += 2;
                 }
-                _ => unreachable!(),
-            },
-            0x0F => match instruction.nn {
-                // FX07 -> Sets VX to delay timer
-                0x07 => self.registers[instruction.x as usize] = self.delay_timer,
-                // FX07 -> Sets delay timer to VX
-                0x15 => self.delay_timer = self.registers[instruction.x as usize],
-                // FX07 -> Sets sound timer to VX
-                0x18 => self.sound_timer = self.registers[instruction.x as usize],
-                // FX1E -> Add VX to I (with carry flag if "overflow" over 0x1000)
-                0x1E => {
-                    let (sum, carry) = self.i.overflowing_add(self.registers[instruction.x as usize] as u16);
-                    self.i = sum;
-                    self.registers[0xF] = if carry || sum >= 0x1000 { 1 } else { 0 };
+            }
+            // FX07 -> Sets VX to delay timer
+            (0xF, _, 0x0, 0x7) => self.registers.write(x, self.delay_timer),
+            // FX07 -> Sets delay timer to VX
+            (0xF, _, 0x0, 0xA) => self.delay_timer = self.registers.read(x),
+            // FX07 -> Sets sound timer to VX
+            (0xF, _, 0x1, 0x5) => self
+                .sound_timer
+                .store(self.registers.read(x), std::sync::atomic::Ordering::Relaxed),
+            // FX1E -> Add VX to I (with carry flag if "overflow" over 0x1000)
+            (0xF, _, 0x1, 0x8) => {
+                let (sum, carry) = self.i.overflowing_add(self.registers.read(x).into());
+                self.i = sum;
+                self.registers.write(0xFu8, if carry || sum >= 0x1000 { 1 } else { 0 });
+            }
+            // FX0A -> Block for key press
+            (0xF, _, 0x1, 0xE) => {
+                if let Some(key) = pressed_keys.first() {
+                    self.registers.write(x, *key);
+                } else {
+                    self.pc -= 2;
                 }
-                // FX0A -> Block for key press
-                0x0A => {
-                    if let Some(key) = pressed_key {
-                        self.registers[instruction.x as usize] = key.into();
-                    } else {
-                        self.pc -= 2;
-                    }
+            }
+            // FX29 -> Sets I to font character for the value in VX
+            (0xF, _, 0x2, 0x9) => self.i = (self.registers.read(x) * 5).into(),
+            // FX33 -> Sets address I, I + 1 and I + 2 to the 3 decimal digits of VX
+            (0xF, _, 0x3, 0x3) => {
+                let vx = self.registers.read(x);
+                self.ram.write(self.i, vx / 100);
+                self.ram.write(self.i + 1, (vx % 100) / 10);
+                self.ram.write(self.i + 2, vx % 10);
+            }
+            // FX55 -> Store registers 0 to X in memory
+            (0xF, _, 0x5, 0x5) => {
+                for x in 0..=x as u16 {
+                    self.ram.write(self.i + x, self.registers.read(x));
                 }
-                // FX29 -> Sets I to font character for the value in VX
-                0x29 => self.i = (self.registers[instruction.x as usize] * 5) as u16,
-                // FX33 -> Sets address I, I + 1 and I + 2 to the 3 decimal digits of VX
-                0x33 => {
-                    self.memory[self.i as usize] = self.registers[instruction.x as usize] / 100;
-                    self.memory[self.i as usize + 1] = (self.registers[instruction.x as usize] % 100) / 10;
-                    self.memory[self.i as usize + 2] = self.registers[instruction.x as usize] % 10;
+            }
+            // FX66 -> Load registers 0 to X from memory
+            (0xF, _, 0x6, 0x5) => {
+                for x in 0..=x as u16 {
+                    self.registers.write(x, self.ram.read(self.i + x));
                 }
-                // FX55 -> Store registers 0 to X in memory
-                0x55 => {
-                    for x in 0..=instruction.x as u16 {
-                        self.memory[(self.i + x) as usize] = self.registers[x as usize];
-                    }
-                }
-                // FX66 -> Load registers 0 to X from memory
-                0x65 => {
-                    for x in 0..=instruction.x as u16 {
-                        self.registers[x as usize] = self.memory[(self.i + x) as usize];
-                    }
-                }
-                _ => unreachable!(),
-            },
+            }
             _ => unreachable!(),
         }
     }

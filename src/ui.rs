@@ -1,10 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::cpu::CPU;
+use crate::cpu::{CPU, Display};
 use ratatui::layout::{Constraint, Flex, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line as TextLine, Span};
@@ -13,6 +14,7 @@ use ratatui::widgets::canvas::Canvas;
 pub struct App {
     exit: bool,
     cpu: CPU,
+    display: Display,
 
     last_cpu_cycle: std::time::Instant,
     last_timer_decrement: std::time::Instant,
@@ -25,6 +27,7 @@ impl Default for App {
 
         Self {
             exit: Default::default(),
+            display: Arc::clone(cpu.display()),
             cpu,
             last_cpu_cycle: std::time::Instant::now(),
             last_timer_decrement: std::time::Instant::now(),
@@ -65,7 +68,7 @@ impl App {
                 >= 1000000 / 700
             {
                 self.last_cpu_cycle = std::time::Instant::now();
-                self.cpu.one_clock_cycle(None);
+                self.cpu.one_clock_cycle(&[]);
             }
         }
 
@@ -96,7 +99,7 @@ impl App {
             .paint(|ctx| {
                 for y in 0..32 {
                     for x in 0..64 {
-                        if self.cpu.display()[y][x] {
+                        if self.display.lock().unwrap()[y][x] {
                             ctx.print(x as f64, -(y as f64), "██");
                         }
                     }
