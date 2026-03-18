@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -7,13 +8,14 @@ use std::{
 };
 
 use crate::emu::{
-    keyboard::Key,
+    keyboard::{Key, get_keyboard},
     memory::{RAM, Registers},
 };
 
 type Opcode = (u8, u8, u8, u8, u8, u16);
 
 pub type Display = Arc<Mutex<[[bool; 64]; 32]>>;
+pub type Keyboard = Arc<Mutex<HashMap<Key, bool>>>;
 
 pub struct CPU {
     ram: RAM,
@@ -22,6 +24,7 @@ pub struct CPU {
     i: u16,
     stack: Vec<u16>,
     display: Display,
+    keyboard: Keyboard,
     delay_timer: u8,
     sound_timer: Arc<AtomicU8>,
 }
@@ -35,6 +38,7 @@ impl Default for CPU {
             i: 0,
             stack: Vec::with_capacity(16),
             display: Arc::new(Mutex::new([[false; 64]; 32])),
+            keyboard: Arc::new(Mutex::new(get_keyboard())),
             delay_timer: 0,
             sound_timer: Arc::new(AtomicU8::new(0)),
         }
@@ -42,10 +46,10 @@ impl Default for CPU {
 }
 
 impl CPU {
-    pub fn one_clock_cycle(&mut self, pressed_keys: &[Key]) {
+    pub fn one_clock_cycle(&mut self) {
         let instruction = self.fetch();
         let opcode = self.decode(instruction);
-        self.execute(opcode, pressed_keys);
+        self.execute(opcode);
     }
 
     pub fn decrement_sound(&mut self) {
@@ -69,6 +73,10 @@ impl CPU {
         &self.display
     }
 
+    pub fn keyboard(&self) -> &Keyboard {
+        &self.keyboard
+    }
+
     fn fetch(&mut self) -> u16 {
         let instruction = ((self.ram.read(self.pc) as u16) << 8) + (self.ram.read(self.pc + 1) as u16);
         self.pc += 2;
@@ -86,7 +94,7 @@ impl CPU {
         )
     }
 
-    fn execute(&mut self, instruction: Opcode, pressed_keys: &[Key]) {
+    fn execute(&mut self, instruction: Opcode) {
         let (code, x, y, n, nn, nnn) = instruction;
         match (code, x, y, n) {
             // 0000 -> Call SYS routine (NOT IMPLEMENTED)
@@ -202,33 +210,45 @@ impl CPU {
             }
             // EX9E -> Skip one if key VX is pressed
             (0xE, _, 0x9, 0xE) => {
-                if pressed_keys.contains(&self.registers.read(x).into()) {
+                if *self
+                    .keyboard
+                    .lock()
+                    .unwrap()
+                    .get(&self.registers.read(x).into())
+                    .unwrap()
+                {
                     self.pc += 2;
                 }
             }
             // EXA1 -> Skip one if key VX is not pressed
             (0xE, _, 0xA, 0x1) => {
-                if !pressed_keys.contains(&self.registers.read(x).into()) {
+                if !*self
+                    .keyboard
+                    .lock()
+                    .unwrap()
+                    .get(&self.registers.read(x).into())
+                    .unwrap()
+                {
                     self.pc += 2;
                 }
             }
             // FX07 -> Sets VX to delay timer
             (0xF, _, 0x0, 0x7) => self.registers.write(x, self.delay_timer),
-            // FX07 -> Sets delay timer to VX
-            (0xF, _, 0x0, 0xA) => self.delay_timer = self.registers.read(x),
-            // FX07 -> Sets sound timer to VX
-            (0xF, _, 0x1, 0x5) => self
+            // FX15 -> Sets delay timer to VX
+            (0xF, _, 0x1, 0x5) => self.delay_timer = self.registers.read(x),
+            // FX18 -> Sets sound timer to VX
+            (0xF, _, 0x1, 0x8) => self
                 .sound_timer
                 .store(self.registers.read(x), std::sync::atomic::Ordering::Relaxed),
             // FX1E -> Add VX to I (with carry flag if "overflow" over 0x1000)
-            (0xF, _, 0x1, 0x8) => {
+            (0xF, _, 0x1, 0xE) => {
                 let (sum, carry) = self.i.overflowing_add(self.registers.read(x).into());
                 self.i = sum;
                 self.registers.write(0xFu8, if carry || sum >= 0x1000 { 1 } else { 0 });
             }
             // FX0A -> Block for key press
-            (0xF, _, 0x1, 0xE) => {
-                if let Some(key) = pressed_keys.first() {
+            (0xF, _, 0x0, 0xA) => {
+                if let Some((key, _)) = self.keyboard.lock().unwrap().iter().find(|(_, pressed)| **pressed) {
                     self.registers.write(x, *key);
                 } else {
                     self.pc -= 2;

@@ -1,4 +1,27 @@
-#[derive(Clone, Copy)]
+use std::collections::HashMap;
+
+pub fn get_keyboard() -> HashMap<Key, bool> {
+    HashMap::from([
+        (Key::ZERO, false),
+        (Key::ONE, false),
+        (Key::TWO, false),
+        (Key::THREE, false),
+        (Key::FOUR, false),
+        (Key::FIVE, false),
+        (Key::SIX, false),
+        (Key::SEVEN, false),
+        (Key::EIGHT, false),
+        (Key::NINE, false),
+        (Key::A, false),
+        (Key::B, false),
+        (Key::C, false),
+        (Key::D, false),
+        (Key::E, false),
+        (Key::F, false),
+    ])
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
     ZERO,
     ONE,
@@ -16,20 +39,6 @@ pub enum Key {
     D,
     E,
     F,
-}
-
-impl PartialEq<u8> for Key {
-    fn eq(&self, other: &u8) -> bool {
-        let key: u8 = (*self).into();
-        key == *other
-    }
-}
-
-impl PartialEq<Key> for Key {
-    fn eq(&self, other: &Key) -> bool {
-        let key: u8 = (*self).into();
-        *other == key
-    }
 }
 
 impl From<Key> for u8 {
