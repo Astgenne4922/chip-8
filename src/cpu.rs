@@ -150,9 +150,7 @@ impl CPU {
             (0x8, _, _, 0x5) => {
                 let (sub, carry) = self.registers.read(x).overflowing_sub(self.registers.read(y));
                 self.registers.write(x, sub);
-                if carry {
-                    self.registers.write(0xFu8, if carry { 0 } else { 1 });
-                }
+                self.registers.write(0xFu8, if carry { 0 } else { 1 });
             }
             // 8XY6 -> Set VX to VX >> 1 (with carry flag)
             (0x8, _, _, 0x6) => {
