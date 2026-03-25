@@ -158,10 +158,10 @@ impl CPU {
                 self.registers.write(x, vx >> 1);
                 self.registers.write(0xFu8, vx & 0b00000001);
             }
-            // 8XY7 -> Subtract VX from VY (with carry flag)
+            // 8XY7 -> Subtract VX from VY and set the result to VX (with carry flag)
             (0x8, _, _, 0x7) => {
                 let (sub, carry) = self.registers.read(y).overflowing_sub(self.registers.read(x));
-                self.registers.write(y, sub);
+                self.registers.write(x, sub);
                 self.registers.write(0xFu8, if carry { 0 } else { 1 });
             }
             // 8XYE -> Set VX to VX << 1 (with carry flag)
