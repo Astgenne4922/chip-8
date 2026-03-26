@@ -273,13 +273,15 @@ impl CPU {
             // FX55 -> Store registers 0 to X in memory
             (0xF, _, 0x5, 0x5) => {
                 for x in 0..=x as u16 {
-                    self.ram.write(self.i + x, self.registers.read(x));
+                    self.ram.write(self.i, self.registers.read(x));
+                    self.i += 1;
                 }
             }
             // FX66 -> Load registers 0 to X from memory
             (0xF, _, 0x6, 0x5) => {
                 for x in 0..=x as u16 {
-                    self.registers.write(x, self.ram.read(self.i + x));
+                    self.registers.write(x, self.ram.read(self.i));
+                    self.i += 1;
                 }
             }
             _ => unreachable!(),
