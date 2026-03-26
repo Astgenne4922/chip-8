@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -7,15 +6,12 @@ use std::{
     },
 };
 
-use crate::emu::{
-    keyboard::{Key, get_keyboard},
-    memory::{RAM, Registers},
-};
+use crate::emu::memory::{RAM, Registers};
 
 type Opcode = (u8, u8, u8, u8, u8, u16);
 
 pub type Display = Arc<Mutex<[[bool; 64]; 32]>>;
-pub type Keyboard = Arc<Mutex<HashMap<Key, bool>>>;
+pub type Keyboard = Arc<Mutex<[bool; 16]>>;
 
 pub struct CPU {
     ram: RAM,
@@ -38,7 +34,7 @@ impl Default for CPU {
             i: 0,
             stack: Vec::with_capacity(16),
             display: Arc::new(Mutex::new([[false; 64]; 32])),
-            keyboard: Arc::new(Mutex::new(get_keyboard())),
+            keyboard: Arc::new(Mutex::new([false; 16])),
             delay_timer: 0,
             sound_timer: Arc::new(AtomicU8::new(0)),
         }
@@ -209,8 +205,8 @@ impl CPU {
                         }
                         let pixel = ((s & (1 << (7 - b))) >> (7 - b)) == 1;
                         if pixel {
-                        if display[vy as usize][vx as usize] {
-                            self.registers.write(0xFu8, 1);
+                            if display[vy as usize][vx as usize] {
+                                self.registers.write(0xFu8, 1);
                             }
                             display[vy as usize][vx as usize] = !display[vy as usize][vx as usize];
                         }
@@ -221,25 +217,13 @@ impl CPU {
             }
             // EX9E -> Skip one if key VX is pressed
             (0xE, _, 0x9, 0xE) => {
-                if *self
-                    .keyboard
-                    .lock()
-                    .unwrap()
-                    .get(&self.registers.read(x).into())
-                    .unwrap()
-                {
+                if self.keyboard.lock().unwrap()[self.registers.read(x) as usize] {
                     self.pc += 2;
                 }
             }
             // EXA1 -> Skip one if key VX is not pressed
             (0xE, _, 0xA, 0x1) => {
-                if !*self
-                    .keyboard
-                    .lock()
-                    .unwrap()
-                    .get(&self.registers.read(x).into())
-                    .unwrap()
-                {
+                if !self.keyboard.lock().unwrap()[self.registers.read(x) as usize] {
                     self.pc += 2;
                 }
             }
@@ -259,8 +243,17 @@ impl CPU {
             }
             // FX0A -> Block for key press
             (0xF, _, 0x0, 0xA) => {
-                if let Some((key, _)) = self.keyboard.lock().unwrap().iter().find(|(_, pressed)| **pressed) {
-                    self.registers.write(x, *key);
+                let key = self
+                    .keyboard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, pressed)| **pressed)
+                    .map(|(key, _)| key as u8);
+
+                if let Some(pressed_key) = key {
+                    self.registers.write(x, pressed_key);
                 } else {
                     self.pc -= 2;
                 }
