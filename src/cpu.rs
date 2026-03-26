@@ -161,11 +161,11 @@ impl CPU {
                 self.registers.write(x, sub);
                 self.registers.write(0xFu8, if carry { 0 } else { 1 });
             }
-            // 8XY6 -> Set VX to VX >> 1 (with carry flag)
+            // 8XY6 -> Set VX to VY >> 1 (with carry flag)
             (0x8, _, _, 0x6) => {
-                let vx = self.registers.read(x);
-                self.registers.write(x, vx >> 1);
-                self.registers.write(0xFu8, vx & 0b00000001);
+                let vy = self.registers.read(y);
+                self.registers.write(x, vy >> 1);
+                self.registers.write(0xFu8, vy & 0b00000001);
             }
             // 8XY7 -> Subtract VX from VY and set the result to VX (with carry flag)
             (0x8, _, _, 0x7) => {
@@ -173,11 +173,11 @@ impl CPU {
                 self.registers.write(x, sub);
                 self.registers.write(0xFu8, if carry { 0 } else { 1 });
             }
-            // 8XYE -> Set VX to VX << 1 (with carry flag)
+            // 8XYE -> Set VX to VY << 1 (with carry flag)
             (0x8, _, _, 0xE) => {
-                let vx = self.registers.read(x);
-                self.registers.write(x, vx << 1);
-                self.registers.write(0xFu8, (vx & 0b10000000) >> 7);
+                let vy = self.registers.read(y);
+                self.registers.write(x, vy << 1);
+                self.registers.write(0xFu8, (vy & 0b10000000) >> 7);
             }
             // 9XY0 -> Skip one if VX != VY
             (0x9, _, _, 0x0) => {
