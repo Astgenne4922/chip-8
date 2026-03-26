@@ -135,11 +135,20 @@ impl CPU {
             // 8XY0 -> Set VX to VY
             (0x8, _, _, 0x0) => self.registers.write(x, self.registers.read(y)),
             // 8XY1 -> Set VX to VX OR VY
-            (0x8, _, _, 0x1) => self.registers.write(x, self.registers.read(x) | self.registers.read(y)),
+            (0x8, _, _, 0x1) => {
+                self.registers.write(x, self.registers.read(x) | self.registers.read(y));
+                self.registers.write(0xFu8, 0);
+            }
             // 8XY2 -> Set VX to VX AND VY
-            (0x8, _, _, 0x2) => self.registers.write(x, self.registers.read(x) & self.registers.read(y)),
+            (0x8, _, _, 0x2) => {
+                self.registers.write(x, self.registers.read(x) & self.registers.read(y));
+                self.registers.write(0xFu8, 0);
+            }
             // 8XY3 -> Set VX to VX XOR VY
-            (0x8, _, _, 0x3) => self.registers.write(x, self.registers.read(x) ^ self.registers.read(y)),
+            (0x8, _, _, 0x3) => {
+                self.registers.write(x, self.registers.read(x) ^ self.registers.read(y));
+                self.registers.write(0xFu8, 0);
+            }
             // 8XY4 -> Add VY to VX (with carry flag)
             (0x8, _, _, 0x4) => {
                 let (sum, carry) = self.registers.read(x).overflowing_add(self.registers.read(y));
