@@ -194,6 +194,7 @@ impl CPU {
             // DXYN -> Draws the display
             (0xD, _, _, _) => {
                 let mut vy = self.registers.read(y) % 32;
+                self.registers.write(0xFu8, 0);
 
                 let mut display = self.display.lock().unwrap();
                 for i in 0..n as u16 {
@@ -206,9 +207,12 @@ impl CPU {
                         if vx >= 64 {
                             break;
                         }
-                        display[vy as usize][vx as usize] = ((s & (1 << (7 - b))) >> (7 - b)) == 1;
+                        let pixel = ((s & (1 << (7 - b))) >> (7 - b)) == 1;
+                        if pixel {
                         if display[vy as usize][vx as usize] {
                             self.registers.write(0xFu8, 1);
+                            }
+                            display[vy as usize][vx as usize] = !display[vy as usize][vx as usize];
                         }
                         vx += 1;
                     }
