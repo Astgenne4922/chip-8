@@ -1,3 +1,3 @@
 pub mod cpu;
-pub mod emu;
+pub mod memory;
 pub mod ui;

@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use crate::emu::memory::{RAM, Registers};
+use crate::memory::{RAM, Registers};
 
 type Opcode = (u8, u8, u8, u8, u8, u16);
 
