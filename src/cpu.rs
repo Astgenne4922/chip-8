@@ -12,6 +12,35 @@ type Opcode = (u8, u8, u8, u8, u8, u16);
 
 pub type Display = Arc<Mutex<[[bool; 64]; 32]>>;
 pub type Keyboard = Arc<Mutex<[bool; 16]>>;
+pub struct Timer(Arc<AtomicU8>);
+
+impl Default for Timer {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU8::new(0)))
+    }
+}
+
+impl Clone for Timer {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl Timer {
+    pub fn set(&self, value: u8) {
+        self.0.store(value, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> u8 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn decrement(&self) {
+        if self.0.fetch_sub(1, Ordering::SeqCst) == u8::MAX {
+            self.0.store(0, Ordering::Relaxed);
+        }
+    }
+}
 
 pub struct CPU {
     ram: RAM,
@@ -21,8 +50,8 @@ pub struct CPU {
     stack: Vec<u16>,
     display: Display,
     keyboard: Keyboard,
-    delay_timer: u8,
-    sound_timer: Arc<AtomicU8>,
+    delay_timer: Timer,
+    sound_timer: Timer,
 }
 
 impl Default for CPU {
@@ -35,8 +64,8 @@ impl Default for CPU {
             stack: Vec::with_capacity(16),
             display: Arc::new(Mutex::new([[false; 64]; 32])),
             keyboard: Arc::new(Mutex::new([false; 16])),
-            delay_timer: 0,
-            sound_timer: Arc::new(AtomicU8::new(0)),
+            delay_timer: Timer::default(),
+            sound_timer: Timer::default(),
         }
     }
 }
@@ -46,18 +75,6 @@ impl CPU {
         let instruction = self.fetch();
         let opcode = self.decode(instruction);
         self.execute(opcode);
-    }
-
-    pub fn decrement_sound(&mut self) {
-        if self.sound_timer.fetch_sub(1, Ordering::SeqCst) == u8::MAX {
-            self.sound_timer.store(0, Ordering::Relaxed);
-        }
-    }
-
-    pub fn decrement_delay(&mut self) {
-        if self.delay_timer > 0 {
-            self.delay_timer -= 1;
-        }
     }
 
     pub fn load_rom(&mut self, rom_path: &Path) {
@@ -71,6 +88,14 @@ impl CPU {
 
     pub fn keyboard(&self) -> &Keyboard {
         &self.keyboard
+    }
+
+    pub fn delay_timer(&self) -> &Timer {
+        &self.delay_timer
+    }
+
+    pub fn sound_timer(&self) -> &Timer {
+        &self.sound_timer
     }
 
     fn fetch(&mut self) -> u16 {
@@ -228,13 +253,11 @@ impl CPU {
                 }
             }
             // FX07 -> Sets VX to delay timer
-            (0xF, _, 0x0, 0x7) => self.registers.write(x, self.delay_timer),
+            (0xF, _, 0x0, 0x7) => self.registers.write(x, self.delay_timer.get()),
             // FX15 -> Sets delay timer to VX
-            (0xF, _, 0x1, 0x5) => self.delay_timer = self.registers.read(x),
+            (0xF, _, 0x1, 0x5) => self.delay_timer.set(self.registers.read(x)),
             // FX18 -> Sets sound timer to VX
-            (0xF, _, 0x1, 0x8) => self
-                .sound_timer
-                .store(self.registers.read(x), std::sync::atomic::Ordering::Relaxed),
+            (0xF, _, 0x1, 0x8) => self.sound_timer.set(self.registers.read(x)),
             // FX1E -> Add VX to I (with carry flag if "overflow" over 0x1000)
             (0xF, _, 0x1, 0xE) => {
                 let (sum, carry) = self.i.overflowing_add(self.registers.read(x).into());

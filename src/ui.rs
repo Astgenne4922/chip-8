@@ -1,10 +1,10 @@
 use crossterm::event::{self, KeyCode};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::cpu::{CPU, Display, Keyboard};
+use crate::cpu::{CPU, Display, Keyboard, Timer};
 use ratatui::layout::{Constraint, Flex, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line as TextLine, Span};
@@ -12,74 +12,74 @@ use ratatui::widgets::canvas::Canvas;
 
 pub struct App {
     exit: bool,
-    cpu: CPU,
+    cpu: Arc<Mutex<CPU>>,
     display: Display,
     keyboard: Keyboard,
-
-    last_cpu_cycle: std::time::Instant,
-    last_timer_decrement: std::time::Instant,
+    delay_timer: Timer,
+    sound_timer: Timer,
 }
 
 impl Default for App {
     fn default() -> Self {
-        let mut cpu = CPU::default();
-        // cpu.load_rom(&std::path::PathBuf::from("./roms/test_opcode.ch8"));
-        cpu.load_rom(&std::path::PathBuf::from(
-            "./roms/programs/BMP Viewer - Hello (C8 example) [Hap, 2005].ch8",
-        ));
+        let cpu = Arc::new(Mutex::new(CPU::default()));
+        let (display, keyboard, delay_timer, sound_timer) = {
+            let mut cpu = cpu.lock().unwrap();
+            // cpu.load_rom(&std::path::PathBuf::from("./roms/tests/5-quirks.ch8"));
+            cpu.load_rom(&std::path::PathBuf::from("./roms/tests/6-keypad.ch8"));
+            // cpu.load_rom(&std::path::PathBuf::from("./roms/tests/7-beep.ch8"));
+
+            (
+                Arc::clone(cpu.display()),
+                Arc::clone(cpu.keyboard()),
+                cpu.delay_timer().clone(),
+                cpu.sound_timer().clone(),
+            )
+        };
 
         Self {
             exit: Default::default(),
-            display: Arc::clone(cpu.display()),
-            keyboard: Arc::clone(cpu.keyboard()),
             cpu,
-            last_cpu_cycle: std::time::Instant::now(),
-            last_timer_decrement: std::time::Instant::now(),
+            display,
+            keyboard,
+            delay_timer,
+            sound_timer,
         }
     }
 }
 
 impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
+        self.timer_thread();
+        self.cpu_thread();
+
         while !self.exit {
-            let size = terminal.size()?;
-            if size.height < 36 || size.width < 130 {
-                terminal.draw(|frame| {
-                    let par = Paragraph::new("too small")
-                        .centered()
-                        .block(Block::bordered().padding(Padding::new(0, 0, size.height / 2, 0)));
-                    frame.render_widget(par, frame.area());
-                })?;
-                continue;
-            }
-            terminal.draw(|frame| self.draw(frame))?;
+            if !self.is_too_small(terminal)? {
+                terminal.draw(|frame| self.draw(frame))?;
 
-                if std::time::Instant::now()
-                    .duration_since(self.last_timer_decrement)
-                    .as_micros()
-                    >= 1000000 / 60
-                {
-                    self.last_timer_decrement = std::time::Instant::now();
-                    self.cpu.decrement_delay();
-                    self.cpu.decrement_sound();
+                if event::poll(Duration::from_millis(10))? {
+                    self.handle_events()?;
+                } else {
+                    *self.keyboard.lock().unwrap() = [false; 16];
                 }
-
-                if std::time::Instant::now()
-                    .duration_since(self.last_cpu_cycle)
-                    .as_micros()
-                    >= 1000000 / 700
-                {
-                    self.last_cpu_cycle = std::time::Instant::now();
-                    self.cpu.one_clock_cycle();
-                }
-
-            *self.keyboard.lock().unwrap() = [false; 16];
-            if event::poll(Duration::from_millis(100))? {
-            self.handle_events()?;
             }
         }
 
         Ok(())
+    }
+
+    fn is_too_small(&self, terminal: &mut DefaultTerminal) -> std::io::Result<bool> {
+        let size = terminal.size()?;
+        if size.height < 36 || size.width < 130 {
+            terminal.draw(|frame| {
+                let par = Paragraph::new("too small")
+                    .centered()
+                    .block(Block::bordered().padding(Padding::new(0, 0, size.height / 2, 0)));
+                frame.render_widget(par, frame.area());
+            })?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -123,6 +123,8 @@ impl App {
             if matches!(key.code, KeyCode::Esc) {
                 self.exit = true;
             } else {
+                *self.keyboard.lock().unwrap() = [false; 16];
+
                 let keypad_key: Option<usize> = match key.code {
                     KeyCode::Char('1') => Some(1),
                     KeyCode::Char('2') => Some(2),
@@ -149,5 +151,36 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn timer_thread(&self) {
+        let delay_timer = self.delay_timer.clone();
+        let sound_timer = self.sound_timer.clone();
+        std::thread::spawn(move || {
+            let mut last_time = std::time::Instant::now();
+
+            loop {
+                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1000000 / 60 {
+                    last_time = std::time::Instant::now();
+
+                    sound_timer.decrement();
+                    delay_timer.decrement();
+                }
+            }
+        });
+    }
+
+    fn cpu_thread(&self) {
+        let cpu = Arc::clone(&self.cpu);
+        std::thread::spawn(move || {
+            let mut last_time = std::time::Instant::now();
+
+            loop {
+                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1000000 / 700 {
+                    last_time = std::time::Instant::now();
+                    cpu.lock().unwrap().one_clock_cycle();
+                }
+            }
+        });
     }
 }
