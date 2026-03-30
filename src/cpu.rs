@@ -42,6 +42,12 @@ impl Timer {
     }
 }
 
+enum State {
+    Running,
+    Waiting,
+    Pressed(u8),
+}
+
 pub struct CPU {
     ram: RAM,
     registers: Registers,
@@ -52,6 +58,7 @@ pub struct CPU {
     keyboard: Keyboard,
     delay_timer: Timer,
     sound_timer: Timer,
+    state: State,
 }
 
 impl Default for CPU {
@@ -66,6 +73,7 @@ impl Default for CPU {
             keyboard: Arc::new(Mutex::new([false; 16])),
             delay_timer: Timer::default(),
             sound_timer: Timer::default(),
+            state: State::Running,
         }
     }
 }
@@ -265,22 +273,37 @@ impl CPU {
                 self.registers.write(0xFu8, if carry || sum >= 0x1000 { 1 } else { 0 });
             }
             // FX0A -> Block for key press
-            (0xF, _, 0x0, 0xA) => {
-                let key = self
-                    .keyboard
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .find(|(_, pressed)| **pressed)
-                    .map(|(key, _)| key as u8);
-
-                if let Some(pressed_key) = key {
-                    self.registers.write(x, pressed_key);
-                } else {
+            (0xF, _, 0x0, 0xA) => match self.state {
+                State::Running => {
+                    if !self.keyboard.lock().unwrap().iter().any(|pressed| *pressed) {
+                        self.state = State::Waiting;
+                    }
                     self.pc -= 2;
                 }
-            }
+                State::Waiting => {
+                    let key = self
+                        .keyboard
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .find(|(_, pressed)| **pressed)
+                        .map(|(key, _)| key as u8);
+
+                    if let Some(pressed_key) = key {
+                        self.state = State::Pressed(pressed_key);
+                    }
+                    self.pc -= 2;
+                }
+                State::Pressed(key) => {
+                    if !self.keyboard.lock().unwrap()[key as usize] {
+                        self.state = State::Running;
+                        self.registers.write(x, key);
+                    } else {
+                        self.pc -= 2;
+                    }
+                }
+            },
             // FX29 -> Sets I to font character for the value in VX
             (0xF, _, 0x2, 0x9) => self.i = (self.registers.read(x) * 5).into(),
             // FX33 -> Sets address I, I + 1 and I + 2 to the 3 decimal digits of VX
