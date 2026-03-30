@@ -5,7 +5,7 @@ use ratatui::{DefaultTerminal, Frame};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::cpu::{CPU, Display, Keyboard, Timer};
+use crate::cpu::{CPU, DISPLAY_HEIGHT, DISPLAY_WIDTH, Display, Keyboard, Timer};
 use ratatui::layout::{Constraint, Flex, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line as TextLine, Span};
@@ -50,12 +50,15 @@ impl Default for App {
 
 impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
+        // Timers thread decremented by one 60 times per second
         self.timer_thread();
+        // CPU emulation running at 700 instructions per second
         self.cpu_thread();
         // Using device_query to handle press/release of keys
         let _ = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
 
         while !self.exit {
+            // Block rendering if the window is too small
             if !self.is_too_small(terminal)? {
                 terminal.draw(|frame| self.draw(frame))?;
 
@@ -71,7 +74,7 @@ impl App {
 
     fn is_too_small(&self, terminal: &mut DefaultTerminal) -> std::io::Result<bool> {
         let size = terminal.size()?;
-        if size.height < 36 || size.width < 130 {
+        if size.height < DISPLAY_HEIGHT as u16 + 4 || size.width < DISPLAY_WIDTH as u16 * 2 + 2 {
             terminal.draw(|frame| {
                 let par = Paragraph::new("too small")
                     .centered()
@@ -85,10 +88,10 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame) {
-        let vertical = Layout::vertical([Constraint::Length(1), Constraint::Length(32 + 2)])
+        let vertical = Layout::vertical([Constraint::Length(1), Constraint::Length(DISPLAY_HEIGHT as u16 + 2)])
             .spacing(1)
             .flex(Flex::Center);
-        let horizontal = Layout::horizontal([Constraint::Length(128 + 2)])
+        let horizontal = Layout::horizontal([Constraint::Length(DISPLAY_WIDTH as u16 * 2 + 2)])
             .spacing(1)
             .flex(Flex::Center);
         let [top, main] = frame.area().layout(&vertical);
@@ -103,12 +106,12 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::White)),
             )
-            .x_bounds([0.0, 64.0])
-            .y_bounds([-32.0, 0.0])
+            .x_bounds([0.0, DISPLAY_WIDTH as f64])
+            .y_bounds([-(DISPLAY_HEIGHT as f64), 0.0])
             .paint(|ctx| {
-                for y in 0..32 {
-                    for x in 0..64 {
-                        if self.display.lock().unwrap()[y][x] {
+                for y in 0..DISPLAY_HEIGHT {
+                    for x in 0..DISPLAY_WIDTH {
+                        if self.display.lock().unwrap()[y as usize][x as usize] {
                             ctx.print(x as f64, -(y as f64), "██");
                         }
                     }

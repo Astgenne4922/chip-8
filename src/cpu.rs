@@ -12,6 +12,10 @@ type Opcode = (u8, u8, u8, u8, u8, u16);
 
 pub type Display = Arc<Mutex<[[bool; 64]; 32]>>;
 pub type Keyboard = Arc<Mutex<[bool; 16]>>;
+
+pub const DISPLAY_HEIGHT: u8 = 32;
+pub const DISPLAY_WIDTH: u8 = 64;
+
 pub struct Timer(Arc<AtomicU8>);
 
 impl Default for Timer {
