@@ -1,4 +1,5 @@
-use crossterm::event::{self, KeyCode};
+use crossterm::event;
+use device_query::{CallbackGuard, DeviceEvents, DeviceEventsHandler};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 use std::sync::{Arc, Mutex};
@@ -51,15 +52,16 @@ impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         self.timer_thread();
         self.cpu_thread();
+        // Using device_query to handle press/release of keys
+        let _ = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
 
         while !self.exit {
             if !self.is_too_small(terminal)? {
                 terminal.draw(|frame| self.draw(frame))?;
 
+                // Normal UI key handling
                 if event::poll(Duration::from_millis(10))? {
                     self.handle_events()?;
-                } else {
-                    *self.keyboard.lock().unwrap() = [false; 16];
                 }
             }
         }
@@ -119,35 +121,9 @@ impl App {
     fn handle_events(&mut self) -> std::io::Result<()> {
         if let Some(key) = event::read()?.as_key_event()
             && key.is_press()
+            && matches!(key.code, event::KeyCode::Esc)
         {
-            if matches!(key.code, KeyCode::Esc) {
-                self.exit = true;
-            } else {
-                *self.keyboard.lock().unwrap() = [false; 16];
-
-                let keypad_key: Option<usize> = match key.code {
-                    KeyCode::Char('1') => Some(1),
-                    KeyCode::Char('2') => Some(2),
-                    KeyCode::Char('3') => Some(3),
-                    KeyCode::Char('4') => Some(0xC),
-                    KeyCode::Char('q') => Some(4),
-                    KeyCode::Char('w') => Some(5),
-                    KeyCode::Char('e') => Some(6),
-                    KeyCode::Char('r') => Some(0xD),
-                    KeyCode::Char('a') => Some(7),
-                    KeyCode::Char('s') => Some(8),
-                    KeyCode::Char('d') => Some(9),
-                    KeyCode::Char('f') => Some(0xE),
-                    KeyCode::Char('z') => Some(0xA),
-                    KeyCode::Char('x') => Some(0),
-                    KeyCode::Char('c') => Some(0xB),
-                    KeyCode::Char('v') => Some(0xF),
-                    _ => None,
-                };
-                if let Some(keypad_key) = keypad_key {
-                    self.keyboard.lock().unwrap()[keypad_key] = true;
-                }
-            }
+            self.exit = true;
         }
 
         Ok(())
@@ -182,5 +158,58 @@ impl App {
                 }
             }
         });
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn register_key_handler(
+        &self,
+    ) -> (
+        CallbackGuard<impl Fn(&device_query::Keycode)>,
+        CallbackGuard<impl Fn(&device_query::Keycode)>,
+    ) {
+        fn map_keys(key: &device_query::Keycode) -> Option<usize> {
+            use device_query::Keycode;
+            match key {
+                Keycode::Key1 => Some(1),
+                Keycode::Key2 => Some(2),
+                Keycode::Key3 => Some(3),
+                Keycode::Key4 => Some(0xC),
+                Keycode::Q => Some(4),
+                Keycode::W => Some(5),
+                Keycode::E => Some(6),
+                Keycode::R => Some(0xD),
+                Keycode::A => Some(7),
+                Keycode::S => Some(8),
+                Keycode::D => Some(9),
+                Keycode::F => Some(0xE),
+                Keycode::Z => Some(0xA),
+                Keycode::X => Some(0),
+                Keycode::C => Some(0xB),
+                Keycode::V => Some(0xF),
+                _ => None,
+            }
+        }
+
+        let device_handler = DeviceEventsHandler::new(Duration::from_millis(10)).unwrap();
+
+        let keyup_callback = {
+            let keyboard = Arc::clone(&self.keyboard);
+            device_handler.on_key_up(move |key| {
+                if let Some(key) = map_keys(key) {
+                    keyboard.lock().unwrap()[key] = false;
+                }
+            })
+        };
+
+        let keydown_callback = {
+            let keyboard = Arc::clone(&self.keyboard);
+            device_handler.on_key_down(move |key| {
+                if let Some(key) = map_keys(key) {
+                    keyboard.lock().unwrap()[key] = true;
+                }
+            })
+        };
+
+        (keyup_callback, keydown_callback)
     }
 }
