@@ -54,6 +54,8 @@ impl App {
         self.timer_thread();
         // CPU emulation running at 700 instructions per second
         self.cpu_thread();
+        // Beeper thread
+        let _sound_device = self.sound_thread(); // The sound device thread will stop when dropped out of scope
         // Using device_query to handle press/release of keys
         let _ = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
 
@@ -147,6 +149,31 @@ impl App {
                 }
             }
         });
+    }
+
+    fn sound_thread(&self) -> tinyaudio::OutputDevice {
+        let sound_timer = self.sound_timer.clone();
+
+        let params = tinyaudio::OutputDeviceParameters {
+            channels_count: 2,
+            sample_rate: 44100,
+            channel_sample_count: 4410,
+        };
+
+        tinyaudio::run_output_device(params, {
+            let mut clock = 0f32;
+            move |data| {
+                let vol = if sound_timer.get() == 0 { 0.0 } else { 0.03 };
+                for samples in data.chunks_mut(params.channels_count) {
+                    clock = (clock + 1.0) % params.sample_rate as f32;
+                    let value = (clock * 440.0 * 2.0 * std::f32::consts::PI / params.sample_rate as f32).sin();
+                    for sample in samples {
+                        *sample = value * vol;
+                    }
+                }
+            }
+        })
+        .unwrap()
     }
 
     fn cpu_thread(&self) {
