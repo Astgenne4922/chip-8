@@ -161,7 +161,7 @@ impl App {
         tinyaudio::run_output_device(params, {
             let mut clock = 0f32;
             move |data| {
-                let vol = if sound_timer.get() == 0 { 0.0 } else { 0.03 };
+                let vol = if sound_timer.get() == 0 { 0.0 } else { 0.1 };
                 for samples in data.chunks_mut(params.channels_count) {
                     clock = (clock + 1.0) % params.sample_rate as f32;
                     let value = (clock * 440.0 * 2.0 * std::f32::consts::PI / params.sample_rate as f32).sin();
