@@ -12,7 +12,6 @@ use ratatui::text::{Line as TextLine, Span};
 use ratatui::widgets::canvas::Canvas;
 
 pub struct App {
-    exit: bool,
     cpu: Arc<Mutex<CPU>>,
     display: Display,
     keyboard: Keyboard,
@@ -38,7 +37,6 @@ impl Default for App {
         };
 
         Self {
-            exit: Default::default(),
             cpu,
             display,
             keyboard,
@@ -57,16 +55,16 @@ impl App {
         // Beeper thread
         let _sound_device = self.sound_thread(); // The sound device thread will stop when dropped out of scope
         // Using device_query to handle press/release of keys
-        let _ = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
+        let _key_handler = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
 
-        while !self.exit {
+        loop {
             // Block rendering if the window is too small
             if !self.is_too_small(terminal)? {
                 terminal.draw(|frame| self.draw(frame))?;
 
                 // Normal UI key handling
-                if event::poll(Duration::from_millis(10))? {
-                    self.handle_events()?;
+                if event::poll(Duration::from_millis(10))? && self.is_quit()? {
+                    break;
                 }
             }
         }
@@ -123,15 +121,15 @@ impl App {
         frame.render_widget(canvas, area);
     }
 
-    fn handle_events(&mut self) -> std::io::Result<()> {
+    fn is_quit(&self) -> std::io::Result<bool> {
         if let Some(key) = event::read()?.as_key_event()
             && key.is_press()
             && matches!(key.code, event::KeyCode::Esc)
         {
-            self.exit = true;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-
-        Ok(())
     }
 
     fn timer_thread(&self) {
