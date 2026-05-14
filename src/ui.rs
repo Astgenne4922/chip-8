@@ -63,8 +63,10 @@ impl App {
                 terminal.draw(|frame| self.draw(frame))?;
 
                 // Normal UI key handling
-                if event::poll(Duration::from_millis(10))? && self.is_quit()? {
-                    break;
+                if event::poll(Duration::from_millis(0))? {
+                    if self.is_quit()? {
+                        break;
+                    }
                 }
             }
         }
@@ -139,7 +141,7 @@ impl App {
             let mut last_time = std::time::Instant::now();
 
             loop {
-                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1000000 / 60 {
+                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1_000_000 / 60 {
                     last_time = std::time::Instant::now();
 
                     sound_timer.decrement();
@@ -180,7 +182,7 @@ impl App {
             let mut last_time = std::time::Instant::now();
 
             loop {
-                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1000000 / 700 {
+                if std::time::Instant::now().duration_since(last_time).as_micros() >= 1_000_000 / 700 {
                     last_time = std::time::Instant::now();
                     cpu.lock().unwrap().one_clock_cycle();
                 }
