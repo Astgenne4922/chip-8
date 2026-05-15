@@ -1,11 +1,15 @@
+mod emulator;
+mod menu;
+
 use crossterm::event;
 use device_query::{CallbackGuard, DeviceEvents, DeviceEventsHandler};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget};
 use ratatui::{DefaultTerminal, Frame};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::cpu::{CPU, DISPLAY_HEIGHT, DISPLAY_WIDTH, Display, Keyboard, Timer};
+use crate::ui::menu::Menu;
 use ratatui::layout::{Constraint, Flex, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line as TextLine, Span};
@@ -17,6 +21,7 @@ pub struct App {
     keyboard: Keyboard,
     delay_timer: Timer,
     sound_timer: Timer,
+    menu: Menu,
 }
 
 impl Default for App {
@@ -42,20 +47,21 @@ impl Default for App {
             keyboard,
             delay_timer,
             sound_timer,
+            menu: Menu::default(),
         }
     }
 }
 
 impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-        // Timers thread decremented by one 60 times per second
-        self.timer_thread();
-        // CPU emulation running at 700 instructions per second
-        self.cpu_thread();
-        // Beeper thread
-        let _sound_device = self.sound_thread(); // The sound device thread will stop when dropped out of scope
-        // Using device_query to handle press/release of keys
-        let _key_handler = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
+        // // Timers thread decremented by one 60 times per second
+        // self.timer_thread();
+        // // CPU emulation running at 700 instructions per second
+        // self.cpu_thread();
+        // // Beeper thread
+        // let _sound_device = self.sound_thread(); // The sound device thread will stop when dropped out of scope
+        // // Using device_query to handle press/release of keys
+        // let _key_handler = self.register_key_handler(); // The callbacks are unregistered when dropped out of scope
 
         loop {
             // Block rendering if the window is too small
@@ -63,10 +69,14 @@ impl App {
                 terminal.draw(|frame| self.draw(frame))?;
 
                 // Normal UI key handling
-                if event::poll(Duration::from_millis(0))? {
-                    if self.is_quit()? {
+                if event::poll(Duration::from_millis(0))?
+                    && let Some(key) = event::read()?.as_key_press_event()
+                {
+                    if matches!(key.code, event::KeyCode::Esc) {
                         break;
                     }
+
+                    self.menu.update(key)?;
                 }
             }
         }
@@ -120,7 +130,8 @@ impl App {
                 }
             });
 
-        frame.render_widget(canvas, area);
+        // frame.render_widget(canvas, area);
+        frame.render_widget(&self.menu, area);
     }
 
     fn is_quit(&self) -> std::io::Result<bool> {
