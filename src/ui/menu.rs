@@ -1,11 +1,14 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::path::PathBuf;
 
-use crossterm::event::{self, KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{self, Constraint, Layout},
+    buffer::Buffer,
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
     widgets::{List, ListState, Scrollbar, ScrollbarState, StatefulWidget, Widget},
 };
 
+#[allow(clippy::upper_case_acronyms)]
 enum Side {
     Category,
     ROM,
@@ -15,7 +18,7 @@ pub struct Menu {
     rom_categories: Vec<String>,
     roms: Vec<Vec<PathBuf>>,
     category: usize,
-    selected_rom: usize,
+    selected_rom: Option<usize>,
     interactable_side: Side,
 }
 
@@ -49,62 +52,31 @@ impl Default for Menu {
                 .collect(),
             roms,
             category: 0,
-            selected_rom: 0,
+            selected_rom: None,
             interactable_side: Side::Category,
         }
     }
 }
 
 impl Widget for &Menu {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         let layout = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]);
         let [category, roms] = area.layout(&layout);
 
-        self.render_category(category, buf);
-        self.render_romlist(roms, buf);
+        render_list(self.rom_categories.clone(), Some(self.category), category, buf);
+        render_list(
+            self.roms[self.category]
+                .iter()
+                .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+                .collect(),
+            self.selected_rom,
+            roms,
+            buf,
+        );
     }
 }
 
 impl Menu {
-    fn render_category(&self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
-        let mut state = ListState::default().with_selected(Some(self.category));
-        StatefulWidget::render(
-            List::new(self.rom_categories.clone()).highlight_symbol(">>"),
-            area,
-            buf,
-            &mut state,
-        );
-
-        let mut scroll_state = ScrollbarState::default()
-            .content_length(self.rom_categories.len())
-            .position(self.category);
-        Scrollbar::default()
-            .thumb_symbol("▐")
-            .render(area, buf, &mut scroll_state);
-    }
-
-    fn render_romlist(&self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
-        let mut state = ListState::default().with_selected(Some(self.selected_rom));
-        StatefulWidget::render(
-            List::new(
-                self.roms[self.category]
-                    .iter()
-                    .map(|path| path.file_name().unwrap().to_string_lossy().to_string()),
-            )
-            .highlight_symbol(">>"),
-            area,
-            buf,
-            &mut state,
-        );
-
-        let mut scroll_state = ScrollbarState::default()
-            .content_length(self.roms[self.category].len())
-            .position(self.selected_rom);
-        Scrollbar::default()
-            .thumb_symbol("▐")
-            .render(area, buf, &mut scroll_state);
-    }
-
     pub fn update(&mut self, key: KeyEvent) -> std::io::Result<Option<PathBuf>> {
         match self.interactable_side {
             Side::Category => self.update_category(key),
@@ -122,27 +94,53 @@ impl Menu {
                     self.category = self.category.saturating_add(1);
                 }
             }
-            KeyCode::Enter | KeyCode::Right => self.interactable_side = Side::ROM,
+            KeyCode::Enter | KeyCode::Right => {
+                self.interactable_side = Side::ROM;
+                self.selected_rom = Some(0);
+            }
             _ => {}
         };
     }
 
     fn update_roms(&mut self, key: KeyEvent) -> Option<PathBuf> {
         match key.code {
-            KeyCode::Up => self.selected_rom = self.selected_rom.saturating_sub(1),
+            KeyCode::Up => self.selected_rom = self.selected_rom.map(|i| i.saturating_sub(1)),
             KeyCode::Down => {
-                if self.selected_rom < self.roms[self.category].len() - 1 {
-                    self.selected_rom = self.selected_rom.saturating_add(1);
+                if self
+                    .selected_rom
+                    .is_some_and(|i| i < self.roms[self.category].len() - 1)
+                {
+                    self.selected_rom = self.selected_rom.map(|i| i.saturating_add(1));
                 }
             }
-            KeyCode::Enter => return Some(self.roms[self.category][self.selected_rom].clone()),
+            KeyCode::Enter => return Some(self.roms[self.category][self.selected_rom.unwrap()].clone()),
             KeyCode::Backspace | KeyCode::Left => {
                 self.interactable_side = Side::Category;
-                self.selected_rom = 0;
+                self.selected_rom = None;
             }
             _ => {}
         };
 
         None
+    }
+}
+
+fn render_list(list: Vec<String>, selected_index: Option<usize>, area: Rect, buf: &mut Buffer) {
+    let len = list.len();
+    let mut state = ListState::default().with_selected(selected_index);
+    StatefulWidget::render(
+        List::new(list)
+            .highlight_symbol(">>")
+            .highlight_style(Style::new().fg(Color::Black).bg(Color::White)),
+        area,
+        buf,
+        &mut state,
+    );
+
+    if let Some(selected_index) = selected_index {
+        let mut scroll_state = ScrollbarState::default().content_length(len).position(selected_index);
+        Scrollbar::default()
+            .thumb_symbol("▐")
+            .render(area, buf, &mut scroll_state);
     }
 }
