@@ -88,7 +88,7 @@ impl App {
         let size = terminal.size()?;
         if size.height < DISPLAY_HEIGHT as u16 + 4 || size.width < DISPLAY_WIDTH as u16 * 2 + 2 {
             terminal.draw(|frame| {
-                let par = Paragraph::new("too small")
+                let par = Paragraph::new(format!("too small - {} x {}", size.width, size.height))
                     .centered()
                     .block(Block::bordered().padding(Padding::new(0, 0, size.height / 2, 0)));
                 frame.render_widget(par, frame.area());
